@@ -18,31 +18,33 @@ jobs:
         with:
           node-version: 20
 
-      - name: Installer html-validate
-        run: npm install -g html-validate
+      - name: Installer les outils de vérification
+        run: npm install -g html-validate stylelint eslint
 
       - name: Vérifier le HTML
         run: |
-          echo "=== VÉRIFICATION HTML ==="
-          npx html-validate "**/*.html" --max-warnings=0
-          echo "=== SUCCÈS : Aucune erreur trouvée ==="
+          if find . -name "*.html" -not -path "./.git/*" | grep -q .; then
+            echo "=== VÉRIFICATION HTML ==="
+            npx html-validate "**/*.html" --max-warnings=0
+            echo "=== SUCCÈS : Aucune erreur HTML trouvée ==="
+          else
+            echo "ℹ️ Aucun fichier HTML trouvé, étape ignorée"
+          fi
 
       - name: Vérifier les fichiers CSS
         run: |
-          if ls *.css 2>/dev/null; then
+          if find . -name "*.css" -not -path "./.git/*" | grep -q .; then
             echo "=== VÉRIFICATION CSS ==="
-            npm install -g stylelint
-            npx stylelint "**/*.css" || true
+            npx stylelint "**/*.css" || echo "⚠️ Problèmes CSS détectés (voir détails)"
           else
-            echo "Aucun fichier CSS trouvé, étape ignorée"
+            echo "ℹ️ Aucun fichier CSS trouvé, étape ignorée"
           fi
 
       - name: Vérifier les fichiers JavaScript
         run: |
-          if ls *.js 2>/dev/null; then
+          if find . -name "*.js" -not -path "./.git/*" | grep -q .; then
             echo "=== VÉRIFICATION JAVASCRIPT ==="
-            npm install -g eslint
-            npx eslint "**/*.js" || true
+            npx eslint "**/*.js" || echo "⚠️ Problèmes JS détectés (voir détails)"
           else
-            echo "Aucun fichier JS trouvé, étape ignorée"
+            echo "ℹ️ Aucun fichier JS trouvé, étape ignorée"
           fi

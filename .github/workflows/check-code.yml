@@ -5,6 +5,11 @@ on:
     branches: [ "master", "main" ]
   schedule:
     - cron: "0 */5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   check:
@@ -24,27 +29,77 @@ jobs:
       - name: Vérifier le HTML
         run: |
           if find . -name "*.html" -not -path "./.git/*" | grep -q .; then
-            echo "=== VÉRIFICATION HTML ==="
-            npx html-validate "**/*.html" --max-warnings=0
-            echo "=== SUCCÈS : Aucune erreur HTML trouvée ==="
+            echo "=== RAPPORT HTML ===" >> rapport.txt
+            npx html-validate "**/*.html" --max-warnings=0 >> rapport.txt 2>&1 || true
           else
-            echo "ℹ️ Aucun fichier HTML trouvé, étape ignorée"
+            echo "ℹ️ Aucun fichier HTML" >> rapport.txt
           fi
 
-      - name: Vérifier les fichiers CSS
+      - name: Vérifier le CSS
         run: |
           if find . -name "*.css" -not -path "./.git/*" | grep -q .; then
-            echo "=== VÉRIFICATION CSS ==="
-            npx stylelint "**/*.css" || echo "⚠️ Problèmes CSS détectés (voir détails)"
+            echo "=== RAPPORT CSS ===" >> rapport.txt
+            npx stylelint "**/*.css" >> rapport.txt 2>&1 || true
           else
-            echo "ℹ️ Aucun fichier CSS trouvé, étape ignorée"
+            echo "ℹ️ Aucun fichier CSS" >> rapport.txt
           fi
 
-      - name: Vérifier les fichiers JavaScript
+      - name: Vérifier le JavaScript
         run: |
           if find . -name "*.js" -not -path "./.git/*" | grep -q .; then
-            echo "=== VÉRIFICATION JAVASCRIPT ==="
-            npx eslint "**/*.js" || echo "⚠️ Problèmes JS détectés (voir détails)"
+            echo "=== RAPPORT JAVASCRIPT ===" >> rapport.txt
+            npx eslint "**/*.js" >> rapport.txt 2>&1 || true
           else
-            echo "ℹ️ Aucun fichier JS trouvé, étape ignorée"
+            echo "ℹ️ Aucun fichier JS" >> rapport.txt
           fi
+
+      - name: Créer le rapport d'alerte (Issue)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ERREURS=$(grep -ciE " error " rapport.txt || echo 0)
+          if [ "$ERREURS" != "0" ]; then
+            echo "=== RAPPORT DE VERIFICATION ===" > body.txt
+            echo "" >> body.txt
+            echo "**$ERREURS erreur(s) détectée(s)** dans ${{ github.repository }} le $(date -u '+%d/%m/%Y à %H:%M UTC')" >> body.txt
+            echo "" >> body.txt
+            echo "Déclenché par : ${{ github.event_name }}" >> body.txt
+            echo "" >> body.txt
+            cat rapport.txt >> body.txt
+            echo "" >> body.txt
+            echo "---" >> body.txt
+            echo "🛠️ Pour corriger : dis-moi 'oui, corrige' et je m'occupe des corrections !" >> body.txt
+
+            # Vérifier si une issue d'alerte existe déjà
+            EXISTANTE=$(gh issue list --state open --json number,title | python3 -c "
+import json, sys
+try:
+    issues = json.load(sys.stdin)
+    for i in issues:
+        if 'Problèmes détectés' in i['title']:
+            print(i['number'])
+            break
+except:
+    pass
+")
+            if [ -z "$EXISTANTE" ]; then
+              gh issue create --title "🚨 Problèmes détectés dans le code" --body-file body.txt
+              echo "✅ Issue créée avec le rapport"
+            else
+              gh issue comment "$EXISTANTE" --body-file body.txt
+              echo "✅ Rapport ajouté à l'issue #$EXISTANTE"
+            fi
+          else
+            echo "✅ Aucune erreur détectée - pas de rapport nécessaire"
+          fi
+
+      - name: Échec si erreurs (déclenche la notification email)
+        if: always()
+        run: |
+          ERREURS=$(grep -ciE " error " rapport.txt || echo 0)
+          if [ "$ERREURS" != "0" ]; then
+            echo "❌ $ERREURS erreur(s) détectée(s) - rapport créé, correction en attente"
+            exit 1
+          fi
+          echo "✅ Vérification terminée : aucune erreur"

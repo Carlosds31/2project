@@ -7,6 +7,10 @@ on:
     - cron: "0 */5 * * *"
   workflow_dispatch:
 
+concurrency:
+  group: verification
+  cancel-in-progress: true
+
 permissions:
   contents: read
   issues: write
@@ -14,6 +18,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    outputs:
+      erreurs: ${{ steps.compteur.outputs.erreurs }}
     steps:
       - name: Récupérer le code
         uses: actions/checkout@v4
@@ -59,6 +65,13 @@ jobs:
             echo "ℹ️ Aucun fichier JS" >> rapport.txt
           fi
 
+      - name: Compter les erreurs
+        id: compteur
+        run: |
+          ERREURS=$(grep -ciE " error " rapport.txt || echo 0)
+          echo "erreurs=$ERREURS" >> $GITHUB_OUTPUT
+          echo "Erreurs détectées: $ERREURS"
+
       - name: Créer le rapport d'alerte (Issue)
         if: always()
         env:
@@ -75,7 +88,7 @@ jobs:
             cat rapport.txt >> body.txt
             echo "" >> body.txt
             echo "---" >> body.txt
-            echo "Pour corriger : dis-moi 'oui, corrige' et je m'occupe des corrections !" >> body.txt
+            echo "🛠️ Une verification detaillee attend ton approbation dans l'onglet Actions." >> body.txt
 
             EXISTANTE=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Problèmes détectés")) | .number' | head -1)
             if [ -z "$EXISTANTE" ]; then
@@ -89,12 +102,58 @@ jobs:
             echo "✅ Aucune erreur détectée - pas de rapport nécessaire"
           fi
 
-      - name: Échec si erreurs (déclenche la notification email)
-        if: always()
+  rapport:
+    needs: check
+    if: needs.check.outputs.erreurs != '0'
+    runs-on: ubuntu-latest
+    environment: corrections
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Configurer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Installer les outils de vérification
+        run: npm install -g html-validate stylelint eslint
+
+      - name: Vérification détaillée
         run: |
-          ERREURS=$(grep -ciE " error " rapport.txt || echo 0)
-          if [ "$ERREURS" != "0" ]; then
-            echo "❌ $ERREURS erreur(s) détectée(s) - rapport créé, correction en attente"
-            exit 1
+          echo "=== VERIFICATION DETAILLEE APPRoUVEE ===" > rapport-detail.txt
+          echo "Date: $(date -u '+%d/%m/%Y %H:%M UTC')" >> rapport-detail.txt
+          echo "Analyse approuvée par le propriétaire du dépôt." >> rapport-detail.txt
+          echo "" >> rapport-detail.txt
+          if find . -name "*.html" -not -path "./.git/*" | grep -q .; then
+            echo "--- HTML ---" >> rapport-detail.txt
+            npx html-validate "**/*.html" --max-warnings=0 >> rapport-detail.txt 2>&1 || true
           fi
-          echo "✅ Vérification terminée : aucune erreur"
+          if find . -name "*.css" -not -path "./.git/*" | grep -q .; then
+            if ! ls .stylelintrc* stylelint.config.* 2>/dev/null | grep -q .; then
+              echo '{ "rules": {} }' > .stylelintrc.json
+            fi
+            echo "--- CSS ---" >> rapport-detail.txt
+            npx stylelint "**/*.css" >> rapport-detail.txt 2>&1 || true
+          fi
+          if find . -name "*.js" -not -path "./.git/*" | grep -q .; then
+            if ! ls .eslintrc* eslint.config.* 2>/dev/null | grep -q .; then
+              echo '{ "env": { "browser": true, "es2021": true }, "parserOptions": { "ecmaVersion": "latest" }, "rules": {} }' > .eslintrc.json
+            fi
+            echo "--- JAVASCRIPT ---" >> rapport-detail.txt
+            npx eslint "**/*.js" >> rapport-detail.txt 2>&1 || true
+          fi
+          echo "" >> rapport-detail.txt
+          echo "Fin du rapport détaillé." >> rapport-detail.txt
+
+      - name: Publier le rapport détaillé sur l'issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ISSUE=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Problèmes détectés")) | .number' | head -1)
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" --body-file rapport-detail.txt
+            echo "✅ Rapport détaillé publié sur l'issue #$ISSUE"
+          else
+            echo "⚠️ Aucune issue ouverte trouvée"
+          fi

@@ -1,0 +1,48 @@
+name: Vérification automatique du code
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  schedule:
+    - cron: "0 */5 * * *"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Configurer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Installer html-validate
+        run: npm install -g html-validate
+
+      - name: Vérifier le HTML
+        run: |
+          echo "=== VÉRIFICATION HTML ==="
+          npx html-validate "**/*.html" --max-warnings=0
+          echo "=== SUCCÈS : Aucune erreur trouvée ==="
+
+      - name: Vérifier les fichiers CSS
+        run: |
+          if ls *.css 2>/dev/null; then
+            echo "=== VÉRIFICATION CSS ==="
+            npm install -g stylelint
+            npx stylelint "**/*.css" || true
+          else
+            echo "Aucun fichier CSS trouvé, étape ignorée"
+          fi
+
+      - name: Vérifier les fichiers JavaScript
+        run: |
+          if ls *.js 2>/dev/null; then
+            echo "=== VÉRIFICATION JAVASCRIPT ==="
+            npm install -g eslint
+            npx eslint "**/*.js" || true
+          else
+            echo "Aucun fichier JS trouvé, étape ignorée"
+          fi

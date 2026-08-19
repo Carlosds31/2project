@@ -38,6 +38,9 @@ jobs:
       - name: Vérifier le CSS
         run: |
           if find . -name "*.css" -not -path "./.git/*" | grep -q .; then
+            if ! ls .stylelintrc* stylelint.config.* 2>/dev/null | grep -q .; then
+              echo '{ "rules": {} }' > .stylelintrc.json
+            fi
             echo "=== RAPPORT CSS ===" >> rapport.txt
             npx stylelint "**/*.css" >> rapport.txt 2>&1 || true
           else
@@ -47,6 +50,9 @@ jobs:
       - name: Vérifier le JavaScript
         run: |
           if find . -name "*.js" -not -path "./.git/*" | grep -q .; then
+            if ! ls .eslintrc* eslint.config.* 2>/dev/null | grep -q .; then
+              echo '{ "env": { "browser": true, "es2021": true }, "parserOptions": { "ecmaVersion": "latest" }, "rules": {} }' > .eslintrc.json
+            fi
             echo "=== RAPPORT JAVASCRIPT ===" >> rapport.txt
             npx eslint "**/*.js" >> rapport.txt 2>&1 || true
           else

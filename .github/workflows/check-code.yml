@@ -68,7 +68,7 @@ jobs:
       - name: Compter les erreurs
         id: compteur
         run: |
-          ERREURS=$(grep -ciE " error " rapport.txt || echo 0)
+          ERREURS=$(grep -ciE " error " rapport.txt 2>/dev/null || true); ERREURS=${ERREURS:-0}
           echo "erreurs=$ERREURS" >> $GITHUB_OUTPUT
           echo "Erreurs détectées: $ERREURS"
 
@@ -77,7 +77,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ERREURS=$(grep -ciE " error " rapport.txt || echo 0)
+          ERREURS=$(grep -ciE " error " rapport.txt 2>/dev/null || true); ERREURS=${ERREURS:-0}
           if [ "$ERREURS" != "0" ]; then
             echo "=== RAPPORT DE VERIFICATION ===" > body.txt
             echo "" >> body.txt

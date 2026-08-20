@@ -123,6 +123,17 @@ jobs:
           fi
           gh issue comment "$STATUT_ID" --body-file /tmp/msg.txt
 
+      - name: Fermer les anciennes issues de test
+        if: steps.compteur.outputs.erreurs == '0'  # seulement si tout est vert !!!
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Fermer les issues "Problemes detectes" qui sont encore ouvertes
+          for id in $(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Problemes") or contains("🚨")) | .number'); do
+            gh issue close "$id" --reason completed
+            echo "✅ Issue #$id fermee (projet nettoye)"
+          done
+
       - name: Creer l alerte
         if: steps.compteur.outputs.erreurs != '0'
         env:

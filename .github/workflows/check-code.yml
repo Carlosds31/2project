@@ -29,19 +29,19 @@ jobs:
 
       - name: Valider
         run: |
-          echo "=== HTML ===" > rapport.txt
+          echo "=== HTML ===" > /tmp/rapport.txt
           if find . -name "*.html" | grep -q .; then
-            npx html-validate "**/*.html" --max-warnings=0 >> rapport.txt 2>&1 || true
+            npx html-validate "**/*.html" --max-warnings=0 >> /tmp/rapport.txt 2>&1 || true
           else echo "Aucun" >> rapport.txt; fi
-          echo "=== CSS ===" >> rapport.txt
+          echo "=== CSS ===" >> /tmp/rapport.txt
           if find . -name "*.css" | grep -q .; then
             [ -f .stylelintrc.json ] || echo '{"rules":{}}' > .stylelintrc.json
-            npx stylelint "**/*.css" >> rapport.txt 2>&1 || true
+            npx stylelint "**/*.css" >> /tmp/rapport.txt 2>&1 || true
           else echo "Aucun" >> rapport.txt; fi
-          echo "=== JS ===" >> rapport.txt
+          echo "=== JS ===" >> /tmp/rapport.txt
           if find . -name "*.js" | grep -q .; then
             [ -f .eslintrc.json ] || echo '{"env":{"browser":true,"es2021":true},"parserOptions":{"ecmaVersion":"latest"},"rules":{}}' > .eslintrc.json
-            npx eslint "**/*.js" >> rapport.txt 2>&1 || true
+            npx eslint "**/*.js" >> /tmp/rapport.txt 2>&1 || true
           else echo "Aucun" >> rapport.txt; fi
 
       - name: Compter les erreurs
@@ -98,33 +98,33 @@ jobs:
 
       - name: Re-valider pour obtenir les erreurs a jour
         run: |
-          echo "=== HTML ===" > rapport.txt
+          echo "=== HTML ===" > /tmp/rapport.txt
           if find . -name "*.html" | grep -q .; then
-            npx html-validate "**/*.html" --max-warnings=0 >> rapport.txt 2>&1 || true
+            npx html-validate "**/*.html" --max-warnings=0 >> /tmp/rapport.txt 2>&1 || true
           fi
-          echo "=== CSS ===" >> rapport.txt
+          echo "=== CSS ===" >> /tmp/rapport.txt
           if find . -name "*.css" | grep -q .; then
             [ -f .stylelintrc.json ] || echo '{"rules":{}}' > .stylelintrc.json
-            npx stylelint "**/*.css" >> rapport.txt 2>&1 || true
+            npx stylelint "**/*.css" >> /tmp/rapport.txt 2>&1 || true
           fi
-          echo "=== JS ===" >> rapport.txt
+          echo "=== JS ===" >> /tmp/rapport.txt
           if find . -name "*.js" | grep -q .; then
             [ -f .eslintrc.json ] || echo '{"env":{"browser":true,"es2021":true},"parserOptions":{"ecmaVersion":"latest"},"rules":{}}' > .eslintrc.json
-            npx eslint "**/*.js" >> rapport.txt 2>&1 || true
+            npx eslint "**/*.js" >> /tmp/rapport.txt 2>&1 || true
           fi
 
       - name: Corriger automatiquement
         run: |
-          python3 .github/auto-fix.py rapport.txt > resultat.txt 2>&1 || true
-          cat resultat.txt
+          python3 .github/auto-fix.py /tmp/rapport.txt > /tmp/resultat.txt 2>&1 || true
+          cat /tmp/resultat.txt
 
       - name: Generer le rapport avant/apres
         run: |
-          echo "## CORRECTION APPLIQUEE" > rapport-final.md
+          echo "## CORRECTION APPLIQUEE" > /tmp/rapport-final.md
           echo "" >> rapport-final.md
-          echo "Approuve et corrige le $(date -u '+%d/%m/%Y %H:%M UTC')" >> rapport-final.md
+          echo "Approuve et corrige le $(date -u '+%d/%m/%Y %H:%M UTC')" >> /tmp/rapport-final.md
           echo "" >> rapport-final.md
-          cat resultat.txt >> rapport-final.md
+          cat /tmp/resultat.txt >> rapport-final.md
 
       - name: Pousser les corrections
         run: |
@@ -140,4 +140,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Problemes")) | .number' | head -1)
-          [ -n "$ID" ] && gh issue comment "$ID" --body-file rapport-final.md
+          [ -n "$ID" ] && gh issue comment "$ID" --body-file /tmp/rapport-final.md

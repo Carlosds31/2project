@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Auto-correcteur : corrige les erreurs detectees par les validateurs.
-Sans modification de design, corrige uniquement les erreurs sûres."""
+"""Auto-correcteur : corrige les erreurs sûres uniquement.
+- JAMAIS de nouveau fichier
+- JAMAIS de CSS ajoute dans le HTML
+- Si une correction necessite le CSS : on le signale et on demande a l'utilisateur
+"""
 
 import re
-import sys
 import os
+import sys
 
 def lister_erreurs(rapport_texte):
-    """Analyse la sortie html-validate et extrait (fichier, ligne, message, regle)."""
+    """Analyse la sortie du validateur et extrait (fichier, ligne, message, regle)."""
     erreurs = []
     fichier = ""
     for ligne in rapport_texte.splitlines():
@@ -17,15 +20,17 @@ def lister_erreurs(rapport_texte):
         if m and fichier:
             num = int(m.group(1))
             message = m.group(3).strip()
-            # Extraire la regle (dernier mot)
             regle = message.split()[-1] if message.split() else ""
             erreurs.append((fichier, num, message, regle))
     return erreurs
 
 def appliquer_corrections(erreurs):
-    """Applique les corrections sûres. Retourne le rapport avant/apres."""
+    """Applique uniquement les corrections sûres.
+    Retourne (rapport_corrections, questions_pour_utilisateur)."""
     rapport = []
+    questions = []
     fichiers_modifies = {}
+    css_regles = []  # collecte des styles trouves (pour les signaler)
 
     for fichier, num, message, regle in erreurs:
         if not os.path.exists(fichier):
@@ -40,125 +45,73 @@ def appliquer_corrections(erreurs):
         ligne_avant = lignes[num - 1].rstrip('\n')
         corrige = False
 
-        # 1. Espaces en fin de ligne
+        # 1. Espaces en fin de ligne (sûr a 100%)
         if regle == 'no-trailing-whitespace':
             nouvelle = ligne_avant.rstrip()
             if nouvelle != ligne_avant:
                 lignes[num - 1] = nouvelle + '\n'
-                rapport.append(("no-trailing-whitespace", fichier, num,
-                                ligne_avant, nouvelle, "Espaces supprimes en fin de ligne"))
+                rapport.append((fichier, num, "no-trailing-whitespace",
+                                ligne_avant, nouvelle, "Espaces en fin de ligne supprimes"))
                 corrige = True
 
-        # 2. Bouton sans attribut type
+        # 2. Bouton sans type (sûr)
         elif regle == 'no-implicit-button-type':
             m = re.search(r'<button\b([^>]*)>', ligne_avant)
             if m and 'type=' not in m.group(1):
                 nouvelle = re.sub(r'<button\b', '<button type="button"', ligne_avant, count=1)
                 lignes[num - 1] = nouvelle + '\n'
-                rapport.append(("no-implicit-button-type", fichier, num,
-                                ligne_avant, nouvelle, "Ajout de type=\"button\""))
+                rapport.append((fichier, num, "no-implicit-button-type",
+                                ligne_avant, nouvelle, 'Ajout de type="button"'))
                 corrige = True
 
-        # 3. Image sans alt
+        # 3. Image sans alt (sûr : alt vide pour image decorative)
         elif regle == 'wcag/h37':
             if '<img' in ligne_avant and 'alt=' not in ligne_avant:
                 nouvelle = re.sub(r'(<img[^>]*?)(/?>)', r'\1 alt=""\2', ligne_avant, count=1)
                 lignes[num - 1] = nouvelle + '\n'
-                rapport.append(("wcag/h37", fichier, num,
-                                ligne_avant, nouvelle, "Ajout de alt=\"\" (image decorative)"))
+                rapport.append((fichier, num, "wcag/h37",
+                                ligne_avant, nouvelle, 'Ajout de alt=""'))
                 corrige = True
 
-        # 4. Style inline -> deplace dans le CSS
+        # 4. Style inline -> NE PAS CORRIGER, DEMANDER
         elif regle == 'no-inline-style':
             m = re.search(r'style="([^"]*)"', ligne_avant)
             if m:
-                style = m.group(1)
-                # Generer une classe unique
-                cls = f"auto-fix-{num}"
-                # Remplacer style par class
-                nouvelle = ligne_avant.replace(f'style="{style}"', f'class="{cls}"')
-                lignes[num - 1] = nouvelle + '\n'
-                rapport.append(("no-inline-style", fichier, num,
-                                ligne_avant, nouvelle,
-                                f"Style deplace vers CSS (classe .{cls})"))
-                # Enregistrer la regle CSS a ajouter
-                css_regles.append(f".{cls} {{ {style} }}")
-                corrige = True
+                questions.append((fichier, num, m.group(1), ligne_avant))
+                corrige = False
 
-        # 5. Lien sans texte -> aria-label si icone connue
+        # 5. Lien sans texte -> aria-label si icone connue (sûr)
         elif regle == 'wcag/h30':
             icons = re.findall(r'fa-([a-z0-9-]+)', ligne_avant)
             if icons and 'aria-label' not in ligne_avant:
                 icon = icons[-1].replace('-', ' ').title()
                 nouvelle = re.sub(r'(<a[^>]*?)(>)', rf'\1 aria-label="{icon}"\2', ligne_avant, count=1)
                 lignes[num - 1] = nouvelle + '\n'
-                rapport.append(("wcag/h30", fichier, num,
-                                ligne_avant, nouvelle, f"Ajout de aria-label=\"{icon}\""))
+                rapport.append((fichier, num, "wcag/h30",
+                                ligne_avant, nouvelle, f'Ajout de aria-label="{icon}"'))
                 corrige = True
 
-        # 6. Balise fermante orpheline
+        # 6. Balise fermante orpheline (sûr)
         elif regle == 'close-order':
             m = re.match(r'^\s*</([a-z0-9]+)>\s*$', ligne_avant)
             if m:
                 del lignes[num - 1]
-                rapport.append(("close-order", fichier, num,
+                rapport.append((fichier, num, "close-order",
                                 ligne_avant, "(ligne supprimee)", "Balise fermante orpheline supprimee"))
                 corrige = True
 
-    # Ecrire les fichiers modifies (jamais de nouveaux fichiers)
+    # Ecrire UNIQUEMENT les fichiers existants modifies
     fichiers_touches = set()
-    for regle, fichier, num, avant, apres, explication in rapport:
-        if num != 0:
-            fichiers_touches.add(fichier)
-
-    # Regles CSS : dans un fichier CSS existant OU un bloc <style> dans le HTML
-    if css_regles:
-        css_file = None
-        for f in os.listdir('.'):
-            if f.endswith('.css'):
-                css_file = f
-                break
-        if css_file:
-            with open(css_file, 'a', encoding='utf-8') as f:
-                f.write('\n/* Corrections automatiques */\n')
-                for r in css_regles:
-                    f.write(r + '\n')
-            rapport.append(("CSS", css_file, 0, "", "\n".join(css_regles),
-                            "Regles CSS ajoutees dans le fichier CSS existant"))
-        else:
-            for fichier_html in fichiers_modifies:
-                if fichier_html.endswith('.html'):
-                    lignes = fichiers_modifies[fichier_html]
-                    idx_close_head = None
-                    for i, l in enumerate(lignes):
-                        if '</head>' in l:
-                            idx_close_head = i
-                            break
-                    if idx_close_head is not None:
-                        style_block = '<style>\n/* Corrections automatiques */\n'
-                        for r in css_regles:
-                            style_block += r + '\n'
-                        style_block += '</style>\n'
-                        lignes.insert(idx_close_head, style_block)
-                        fichiers_touches.add(fichier_html)
-                        rapport.append(("CSS", fichier_html, 0, "",
-                                        "\n".join(css_regles),
-                                        "Bloc <style> ajoute dans le <head> du HTML existant"))
-                    break
-
-    # Ecrire tous les fichiers modifies
+    for fichier, num, regle, avant, apres, explication in rapport:
+        fichiers_touches.add(fichier)
     for fichier, lignes in fichiers_modifies.items():
         if fichier in fichiers_touches:
             with open(fichier, 'w', encoding='utf-8') as f:
                 f.writelines(lignes)
 
-    return rapport
-
-css_regles = []  # global pour collecter les regles
+    return rapport, questions
 
 if __name__ == '__main__':
-    import sys
-    # Lire le rapport du validateur
     rapport_path = sys.argv[1] if len(sys.argv) > 1 else 'rapport.txt'
     try:
         with open(rapport_path, encoding='utf-8') as f:
@@ -173,18 +126,25 @@ if __name__ == '__main__':
         sys.exit(0)
 
     print(f"=== {len(erreurs)} erreur(s) detectee(s) ===")
-    import os
     for f, n, msg, regle in erreurs:
         print(f"  {os.path.basename(f)}:{n} - {regle}")
 
-    corrections = appliquer_corrections(erreurs)
+    corrections, questions = appliquer_corrections(erreurs)
 
-    print("\n=== RAPPORT AVANT / APRES ===")
-    for regle, fichier, num, avant, apres, explication in corrections:
+    print("\n=== CORRECTIONS APPLIQUEES ===")
+    for fichier, num, regle, avant, apres, explication in corrections:
         print(f"\n[{regle}] {os.path.basename(fichier)} ligne {num}")
-        print(f"  Explication : {explication}")
-        if num != 0:
-            print(f"  AVANT  : {avant}")
-            print(f"  APRES  : {apres}")
+        print(f"  AVANT  : {avant}")
+        print(f"  APRES  : {apres}")
+        print(f"  ({explication})")
 
-    print(f"\n{len(corrections)} correction(s) appliquee(s)")
+    if questions:
+        print("\n=== QUESTIONS POUR L'UTILISATEUR ===")
+        for fichier, num, style, ligne in questions:
+            print(f"\n[style inline] {os.path.basename(fichier)} ligne {num}")
+            print(f"  Code : {ligne}")
+            print(f"  Style trouve : {style}")
+            print("  -> Non corrige automatiquement car cela necessiterait du CSS.")
+            print("  -> Dis-moi : 'corrige en mettant le style dans style.css' ou 'supprime le style'")
+
+    print(f"\n{len(corrections)} correction(s) appliquee(s), {len(questions)} question(s) pour toi")

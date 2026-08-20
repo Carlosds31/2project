@@ -105,17 +105,13 @@ def appliquer_corrections(erreurs):
                                 ligne_avant, "(ligne supprimee)", "Balise fermante orpheline supprimee"))
                 corrige = True
 
-    # Ecrire les fichiers modifies (suivi des fichiers vraiment touches)
+    # Ecrire les fichiers modifies (jamais de nouveaux fichiers)
     fichiers_touches = set()
     for regle, fichier, num, avant, apres, explication in rapport:
-        if num != 0:  # une vraie ligne modifiee
+        if num != 0:
             fichiers_touches.add(fichier)
-    for fichier, lignes in fichiers_modifies.items():
-        if fichier in fichiers_touches:
-            with open(fichier, 'w', encoding='utf-8') as f:
-                f.writelines(lignes)
 
-    # Ecrire les regles CSS si besoin
+    # Regles CSS : dans un fichier CSS existant OU un bloc <style> dans le HTML
     if css_regles:
         css_file = None
         for f in os.listdir('.'):
@@ -128,23 +124,42 @@ def appliquer_corrections(erreurs):
                 for r in css_regles:
                     f.write(r + '\n')
             rapport.append(("CSS", css_file, 0, "", "\n".join(css_regles),
-                            "Regles CSS ajoutees au fichier"))
+                            "Regles CSS ajoutees dans le fichier CSS existant"))
         else:
-            # Creer style-auto.css
-            with open('style-auto.css', 'w', encoding='utf-8') as f:
-                for r in css_regles:
-                    f.write(r + '\n')
-            rapport.append(("CSS", "style-auto.css", 0, "", "\n".join(css_regles),
-                            "Fichier style-auto.css cree (a lier dans le HTML)"))
+            for fichier_html in fichiers_modifies:
+                if fichier_html.endswith('.html'):
+                    lignes = fichiers_modifies[fichier_html]
+                    idx_close_head = None
+                    for i, l in enumerate(lignes):
+                        if '</head>' in l:
+                            idx_close_head = i
+                            break
+                    if idx_close_head is not None:
+                        style_block = '<style>\n/* Corrections automatiques */\n'
+                        for r in css_regles:
+                            style_block += r + '\n'
+                        style_block += '</style>\n'
+                        lignes.insert(idx_close_head, style_block)
+                        fichiers_touches.add(fichier_html)
+                        rapport.append(("CSS", fichier_html, 0, "",
+                                        "\n".join(css_regles),
+                                        "Bloc <style> ajoute dans le <head> du HTML existant"))
+                    break
+
+    # Ecrire tous les fichiers modifies
+    for fichier, lignes in fichiers_modifies.items():
+        if fichier in fichiers_touches:
+            with open(fichier, 'w', encoding='utf-8') as f:
+                f.writelines(lignes)
 
     return rapport
 
-# === MAIN ===
 css_regles = []  # global pour collecter les regles
 
 if __name__ == '__main__':
+    import sys
     # Lire le rapport du validateur
-    rapport_path = sys.argv[1] if len(sys.argv) > 1 else 'rapport-val.txt'
+    rapport_path = sys.argv[1] if len(sys.argv) > 1 else 'rapport.txt'
     try:
         with open(rapport_path, encoding='utf-8') as f:
             rapport_texte = f.read()
@@ -157,15 +172,13 @@ if __name__ == '__main__':
         print("Aucune erreur a corriger")
         sys.exit(0)
 
-    # Afficher le detail
     print(f"=== {len(erreurs)} erreur(s) detectee(s) ===")
+    import os
     for f, n, msg, regle in erreurs:
         print(f"  {os.path.basename(f)}:{n} - {regle}")
 
-    # Appliquer les corrections
     corrections = appliquer_corrections(erreurs)
 
-    # Generer le rapport final
     print("\n=== RAPPORT AVANT / APRES ===")
     for regle, fichier, num, avant, apres, explication in corrections:
         print(f"\n[{regle}] {os.path.basename(fichier)} ligne {num}")

@@ -130,8 +130,9 @@ jobs:
         run: |
           git config user.email "carlosds31@users.noreply.github.com"
           git config user.name "Carlosds31 (auto-fix)"
-          git add -A
+          git add -u
           git diff --cached --quiet || git commit -m "Correction automatique des erreurs (approuvee)"
+          git status --short
           git push origin HEAD
 
       - name: Publier le rapport

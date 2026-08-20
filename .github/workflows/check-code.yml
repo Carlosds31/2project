@@ -20,97 +20,148 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       erreurs: ${{ steps.compteur.outputs.erreurs }}
+      resume: ${{ steps.resume.outputs.resume }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install -g html-validate stylelint eslint
+      - run: npm install -g html-validate stylelint eslint linkinator
 
-      - name: Valider
+      - name: Valider le code statique
         run: |
           echo "=== HTML ===" > /tmp/rapport.txt
-          if find . -name "*.html" | grep -q .; then
+          if find . -name "*.html" -not -path "./.git/*" | grep -q .; then
             npx html-validate "**/*.html" --max-warnings=0 >> /tmp/rapport.txt 2>&1 || true
-          else echo "Aucun" >> rapport.txt; fi
+          else echo "Aucun" >> /tmp/rapport.txt; fi
           echo "=== CSS ===" >> /tmp/rapport.txt
-          if find . -name "*.css" | grep -q .; then
+          if find . -name "*.css" -not -path "./.git/*" | grep -q .; then
             [ -f .stylelintrc.json ] || echo '{"rules":{}}' > .stylelintrc.json
             npx stylelint "**/*.css" >> /tmp/rapport.txt 2>&1 || true
-          else echo "Aucun" >> rapport.txt; fi
+          else echo "Aucun" >> /tmp/rapport.txt; fi
           echo "=== JS ===" >> /tmp/rapport.txt
-          if find . -name "*.js" | grep -q .; then
-            [ -f .eslintrc.json ] || echo '{"env":{"browser":true,"es2021":true},"parserOptions":{"ecmaVersion":"latest"},"rules":{}}' > .eslintrc.json
+          if find . -name "*.js" -not -path "./.git/*" | grep -q .; then
+            [ -f .eslintrc.json ] || echo '{"rules":{},"env":{"browser":true,"es2021":true},"parserOptions":{"ecmaVersion":"latest"}}' > .eslintrc.json
             npx eslint "**/*.js" >> /tmp/rapport.txt 2>&1 || true
-          else echo "Aucun" >> rapport.txt; fi
+          else echo "Aucun" >> /tmp/rapport.txt; fi
+          cat /tmp/rapport.txt
 
-      - name: Compter les erreurs
-        id: compteur
+      - name: Verifier les liens morts (tolerance = 1 lien similaire qui passe)
         run: |
-          ERREURS=$(grep -ciE " error " rapport.txt 2>/dev/null || true); ERREURS=${ERREURS:-0}
+          if find . -name "*.html" | grep -q .; then
+            echo "=== LIENS ===" >> /tmp/rapport.txt
+            npx linkinator "**/*.html" --recurse --skip "mailto:" --skip "tel:" >> /tmp/liens.txt 2>&1 || true
+            # Extraire les liens en erreur
+            grep -E "ERROR|Broken" /tmp/liens.txt | head -10 >> /tmp/rapport.txt || echo "Aucun lien mort" >> /tmp/rapport.txt
+          fi
+
+      - name: Verifier les pages manquantes dans la navigation
+        run: |
+          echo "=== PAGES MANQUANTES ===" >> /tmp/rapport.txt
+          if find . -name "*.html" | grep -q .; then
+            for f in $(find . -name "*.html" -not -path "./.git/*"); do
+              # Chercher les liens internes (.html) dans le fichier
+              grep -oP 'href="([^"]*\.html)"' "$f" 2>/dev/null | while IFS= read -r link; do
+                page=$(echo "$link" | sed 's/href="//;s/"//')
+                if [ ! -f "$(dirname "$f")/$page" ] && [ "$page" != "" ]; then
+                  if ! echo "$page" | grep -qE "^https?://"; then
+                    echo "⚠️ $f -> $page (page introuvable)" >> /tmp/rapport.txt
+                  fi
+                fi
+              done
+            done
+          else
+            echo "Aucun fichier HTML" >> /tmp/rapport.txt
+          fi
+
+      - name: Verifier le responsive design (balise viewport)
+        run: |
+          echo "=== RESPONSIVE ===" >> /tmp/rapport.txt
+          if find . -name "*.html" | grep -q .; then
+            for f in $(find . -name "*.html" -not -path "./.git/*"); do
+              if grep -q 'viewport' "$f" 2>/dev/null; then
+                echo "✅ $(basename $f) : viewport presente" >> /tmp/rapport.txt
+              else
+                echo "⚠️ $(basename $f) : viewport manquante (pas responsive)" >> /tmp/rapport.txt
+              fi
+            done
+          else
+            echo "Aucun fichier HTML" >> /tmp/rapport.txt
+          fi
+
+      - name: Compter les erreurs et generer le resume
+        id: compter
+        run: |
+          ERREURS=$(grep -ciE " error |⚠️|⚠️" /tmp/rapport.txt 2>/dev/null || true); ERREURS=${ERREURS:-0}
           echo "erreurs=$ERREURS" >> $GITHUB_OUTPUT
+          echo "Erreurs totales: $ERREURS"
+
+      - name: Generer le resume
+        id: resume
+        run: |
+          NB_HTML=$(find . -name "*.html" -not -path "./.git/*" | wc -l)
+          NB_CSS=$(find . -name "*.css" -not -path "./.git/*" | wc -l)
+          NB_JS=$(find . -name "*.js" -not -path "./.git/*" | wc -l)
+          echo "resume=📊 ${{ github.repository }}: $NB_HTML HTML, $NB_CSS CSS, $NB_JS JS" >> $GITHUB_OUTPUT
 
       - name: Statut horaire
         if: always()
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          ERREURS=$(grep -ciE " error " rapport.txt 2>/dev/null || echo 0)
-          ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Statut")) | .number' | head -1)
-          [ -z "$ID" ] && { gh issue create --title "Statut verification" --body "Statut" > /dev/null; ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Statut")) | .number' | head -1); }
+          ERREURS=$(grep -ciE " error |⚠️" /tmp/rapport.txt 2>/dev/null || echo 0)
+          STATUT_ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Statut")) | .number' | head -1)
+          [ -z "$STATUT_ID" ] && { gh issue create --title "Statut verification" --body "Statut" > /dev/null; STATUT_ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Statut")) | .number' | head -1); }
+          echo "Verification du $(date -u '+%d/%m/%Y %H:%M UTC')" > /tmp/msg.txt
+          echo "" >> /tmp/msg.txt
+          echo "" >> /tmp/msg.txt
           if [ "$ERREURS" = "0" ]; then
-            echo "OK - Aucune erreur le $(date -u '+%d/%m/%Y %H:%M UTC')" | gh issue comment "$ID" --body-file -
+            echo "OK - Aucune erreur detectee." >> /tmp/msg.txt
           else
-            echo "ATTENTION : $ERREURS erreur(s) - $(date -u '+%d/%m/%Y %H:%M UTC') - approbation requise" | gh issue comment "$ID" --body-file -
+            echo "Total: $ERREURS alertes" >> /tmp/msg.txt
+            tail -20 /tmp/rapport.txt >> /tmp/msg.txt 2>/dev/null || true
           fi
+          gh issue comment "$STATUT_ID" --body-file /tmp/msg.txt
 
-      - name: Creer alerte
+      - name: Creer l alerte
         if: steps.compteur.outputs.erreurs != '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "## Erreurs detectees" > alerte.txt
-          echo "" >> alerte.txt
-          cat rapport.txt >> alerte.txt
-          echo "" >> alerte.txt
-          echo "---" >> alerte.txt
-          echo "**Approuve la verification pour corriger automatiquement ces erreurs.**" >> alerte.txt
-          ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Problemes")) | .number' | head -1)
-          if [ -z "$ID" ]; then
-            gh issue create --title "Problemes detectes" --body-file alerte.txt
+          {
+            echo "## Rapport de verification"
+            echo ""
+            echo "🔍 **${{ steps.compteur.outputs.erreurs }} probleme(s) detecte(s)**"
+            echo ""
+            cat /tmp/rapport.txt
+            echo ""
+            echo "---"
+            echo "**Approuve la verification pour corriger automatiquement les erreurs sure.**"
+          } > /tmp/alerte.txt
+          ISSUE=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Problemes")) | .number' | head -1)
+          if [ -z "$ISSUE" ]; then
+            gh issue create --title "Problemes detectes" --body-file /tmp/alerte.txt
           else
-            gh issue comment "$ID" --body-file alerte.txt
+            gh issue comment "$ISSUE" --body-file /tmp/alerte.txt
           fi
 
-  corriger:
+  autofix:
     needs: check
     if: needs.check.outputs.erreurs != '0'
     runs-on: ubuntu-latest
     environment: corrections
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: true
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install -g html-validate stylelint eslint
+      - run: npm install -g html-validate stylelint eslint linkinator
 
-      - name: Re-valider pour obtenir les erreurs a jour
+      - name: Re-valider
         run: |
           echo "=== HTML ===" > /tmp/rapport.txt
           if find . -name "*.html" | grep -q .; then
             npx html-validate "**/*.html" --max-warnings=0 >> /tmp/rapport.txt 2>&1 || true
-          fi
-          echo "=== CSS ===" >> /tmp/rapport.txt
-          if find . -name "*.css" | grep -q .; then
-            [ -f .stylelintrc.json ] || echo '{"rules":{}}' > .stylelintrc.json
-            npx stylelint "**/*.css" >> /tmp/rapport.txt 2>&1 || true
-          fi
-          echo "=== JS ===" >> /tmp/rapport.txt
-          if find . -name "*.js" | grep -q .; then
-            [ -f .eslintrc.json ] || echo '{"env":{"browser":true,"es2021":true},"parserOptions":{"ecmaVersion":"latest"},"rules":{}}' > .eslintrc.json
-            npx eslint "**/*.js" >> /tmp/rapport.txt 2>&1 || true
           fi
 
       - name: Corriger automatiquement
@@ -118,26 +169,24 @@ jobs:
           python3 .github/auto-fix.py /tmp/rapport.txt > /tmp/resultat.txt 2>&1 || true
           cat /tmp/resultat.txt
 
-      - name: Generer le rapport avant/apres
+      - name: Generer le rapport final
         run: |
-          echo "## CORRECTION APPLIQUEE" > /tmp/rapport-final.md
-          echo "" >> rapport-final.md
-          echo "Approuve et corrige le $(date -u '+%d/%m/%Y %H:%M UTC')" >> /tmp/rapport-final.md
-          echo "" >> rapport-final.md
-          cat /tmp/resultat.txt >> rapport-final.md
+          echo "## CORRECTION APPLIQUEE" > /tmp/final.md
+          echo "Approuve le $(date -u '+%d/%m/%Y %H:%M UTC')" >> /tmp/final.md
+          echo "" >> /tmp/final.md
+          cat /tmp/resultat.txt >> /tmp/final.md
 
       - name: Pousser les corrections
         run: |
           git config user.email "carlosds31@users.noreply.github.com"
-          git config user.name "Carlosds31 (auto-fix)"
+          git config user.name "Carlods31 (auto-fix)"
           git add -u
-          git diff --cached --quiet || git commit -m "Correction automatique des erreurs (approuvee)"
-          git status --short
+          git diff --cached --quiet || git commit -m "Correction automatique (approuvee)"
           git push origin HEAD
 
       - name: Publier le rapport
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Problemes")) | .number' | head -1)
-          [ -n "$ID" ] && gh issue comment "$ID" --body-file /tmp/rapport-final.md
+          ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Problems")) | .number' | head -1)
+          [ -n "$ID" ] && gh issue comment "$ID" --body-file /tmp/final.md

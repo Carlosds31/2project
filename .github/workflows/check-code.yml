@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -44,35 +44,11 @@ jobs:
             npx eslint "**/*.js" >> rapport.txt 2>&1 || true
           else echo "Aucun" >> rapport.txt; fi
 
-      - name: Analyser et generer le detail avec code
+      - name: Compter les erreurs
         id: compteur
         run: |
           ERREURS=$(grep -ciE " error " rapport.txt 2>/dev/null || true); ERREURS=${ERREURS:-0}
           echo "erreurs=$ERREURS" >> $GITHUB_OUTPUT
-          if [ "$ERREURS" != "0" ]; then
-            echo "## DETAIL DES ERREURS" > detail.md
-            echo "" >> detail.md
-            echo "### Code concerne :" >> detail.md
-            echo "" >> detail.md
-            FICHIER=""
-            while IFS= read -r L; do
-              if echo "$L" | grep -qE '^[/.]'; then FICHIER="$L"
-              elif echo "$L" | grep -qE '^\s+[0-9]+:[0-9]+\s+error'; then
-                NUM=$(echo "$L" | awk '{print $1}' | cut -d: -f1)
-                MSG=$(echo "$L" | sed 's/.*error  *//' | sed 's/  */ /g')
-                SHORT=$(basename "$FICHIER" 2>/dev/null)
-                CODE=$(sed -n "${NUM}p" "$FICHIER" 2>/dev/null | sed 's/</\&lt;/g; s/>/\&gt;/g')
-                echo "" >> detail.md
-                echo "**Fichier** : \`$SHORT\` | **Ligne** : $NUM" >> detail.md
-                echo "" >> detail.md
-                echo '```html' >> detail.md
-                echo "$CODE" >> detail.md
-                echo '```' >> detail.md
-                echo "_Erreur_ : $MSG" >> detail.md
-                echo "" >> detail.md
-              fi
-            done < rapport.txt
-          fi
 
       - name: Statut horaire
         if: always()
@@ -83,9 +59,9 @@ jobs:
           ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Statut")) | .number' | head -1)
           [ -z "$ID" ] && { gh issue create --title "Statut verification" --body "Statut" > /dev/null; ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Statut")) | .number' | head -1); }
           if [ "$ERREURS" = "0" ]; then
-            echo "OK - $(date -u '+%d/%m/%Y %H:%M UTC')" | gh issue comment "$ID" --body-file -
+            echo "OK - Aucune erreur le $(date -u '+%d/%m/%Y %H:%M UTC')" | gh issue comment "$ID" --body-file -
           else
-            echo "Erreurs: $ERREURS - $(date)" | gh issue comment "$ID" --body-file -
+            echo "ATTENTION : $ERREURS erreur(s) - $(date -u '+%d/%m/%Y %H:%M UTC') - approbation requise" | gh issue comment "$ID" --body-file -
           fi
 
       - name: Creer alerte
@@ -93,9 +69,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cat detail.md > alerte.txt
+          echo "## Erreurs detectees" > alerte.txt
+          echo "" >> alerte.txt
+          cat rapport.txt >> alerte.txt
+          echo "" >> alerte.txt
           echo "---" >> alerte.txt
-          echo "Approbation requise dans l'onglet Actions." >> alerte.txt
+          echo "**Approuve la verification pour corriger automatiquement ces erreurs.**" >> alerte.txt
           ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Problemes")) | .number' | head -1)
           if [ -z "$ID" ]; then
             gh issue create --title "Problemes detectes" --body-file alerte.txt
@@ -103,53 +82,61 @@ jobs:
             gh issue comment "$ID" --body-file alerte.txt
           fi
 
-  rapport:
+  corriger:
     needs: check
     if: needs.check.outputs.erreurs != '0'
     runs-on: ubuntu-latest
     environment: corrections
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm install -g html-validate stylelint eslint
 
-      - name: Verif detaillee + code
+      - name: Re-valider pour obtenir les erreurs a jour
         run: |
-          echo "## VERIFICATION APPROUVEE" > final.md
-          echo "Approuve le $(date -u '+%d/%m/%Y %H:%M UTC')" >> final.md
-          echo "" >> final.md
-          FICHIER=""
-          npx html-validate "**/*.html" --max-warnings=0 > rapport2.txt 2>&1 || true
-          while IFS= read -r L; do
-            if echo "$L" | grep -qE '^[/.]'; then FICHIER="$L"
-            elif echo "$L" | grep -qE '^\s+[0-9]+:[0-9]+\s+error'; then
-              NUM=$(echo "$L" | awk '{print $1}' | cut -d: -f1)
-              MSG=$(echo "$L" | sed 's/.*error  *//')
-              SHORT=$(basename "$FICHIER" 2>/dev/null)
-              CODE=$(sed -n "${NUM}p" "$FICHIER" 2>/dev/null | sed 's/</\&lt;/g; s/>/\&gt;/g')
-              echo "### \`$SHORT\` ligne $NUM" >> final.md
-              echo "_$MSG_" >> final.md
-              echo '```' >> final.md
-              echo "$CODE" >> final.md
-              echo '```' >> final.md
-              echo "" >> final.md
-              echo "**Correction proposee :**" >> final.md
-              if echo "$MSG" | grep -q "no-inline-style"; then
-                echo "Deplacer le style vers le fichier CSS." >> final.md
-              elif echo "$MSG" | grep -q "wcag/h37"; then
-                echo "Ajouter un attribut \`alt\` descriptif." >> final.md
-              else
-                echo "A corriger selon la regle: $MSG" >> final.md
-              fi
-              echo "" >> final.md
-            fi
-          done < rapport2.txt
+          echo "=== HTML ===" > rapport.txt
+          if find . -name "*.html" | grep -q .; then
+            npx html-validate "**/*.html" --max-warnings=0 >> rapport.txt 2>&1 || true
+          fi
+          echo "=== CSS ===" >> rapport.txt
+          if find . -name "*.css" | grep -q .; then
+            [ -f .stylelintrc.json ] || echo '{"rules":{}}' > .stylelintrc.json
+            npx stylelint "**/*.css" >> rapport.txt 2>&1 || true
+          fi
+          echo "=== JS ===" >> rapport.txt
+          if find . -name "*.js" | grep -q .; then
+            [ -f .eslintrc.json ] || echo '{"env":{"browser":true,"es2021":true},"parserOptions":{"ecmaVersion":"latest"},"rules":{}}' > .eslintrc.json
+            npx eslint "**/*.js" >> rapport.txt 2>&1 || true
+          fi
 
-      - name: Publier
+      - name: Corriger automatiquement
+        run: |
+          python3 .github/auto-fix.py rapport.txt > resultat.txt 2>&1 || true
+          cat resultat.txt
+
+      - name: Generer le rapport avant/apres
+        run: |
+          echo "## CORRECTION APPLIQUEE" > rapport-final.md
+          echo "" >> rapport-final.md
+          echo "Approuve et corrige le $(date -u '+%d/%m/%Y %H:%M UTC')" >> rapport-final.md
+          echo "" >> rapport-final.md
+          cat resultat.txt >> rapport-final.md
+
+      - name: Pousser les corrections
+        run: |
+          git config user.email "carlosds31@users.noreply.github.com"
+          git config user.name "Carlosds31 (auto-fix)"
+          git add -A
+          git diff --cached --quiet || git commit -m "Correction automatique des erreurs (approuvee)"
+          git push origin HEAD
+
+      - name: Publier le rapport
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           ID=$(gh issue list --state open --json number,title --jq '.[] | select(.title | contains("Problemes")) | .number' | head -1)
-          [ -n "$ID" ] && gh issue comment "$ID" --body-file final.md
+          [ -n "$ID" ] && gh issue comment "$ID" --body-file rapport-final.md

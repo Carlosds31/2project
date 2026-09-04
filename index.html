@@ -6,98 +6,60 @@
     <title>Document</title>
 </head>
 <body>
-     <h1>Menu de délicieuses bouchées</h1>
+    <h1>Menu de délicieuses bouchées</h1>
 
     <h2>Entrées</h2>
-
-  <ul>
-    <li>
-        <strong>Salade Caprese</strong>
-        <p>Tomates fraîches, mozzarella et basilic arrosés d'un filet de glaçage balsamique.</p>
-    </li>
-</ul>
-
-  <ul>
-    <li>
-        <strong>Soupe à la citrouille</strong>
-        <p>Velouté de citrouille crémeux avec une touche de muscade et de crème fraîche.</p>
-    </li>
-</ul>
-
-
-<ul>
-    <li>
-        <strong>Bruschetta</strong>
-
-        <p>Tranches de pain grillé garnies de tomates, ail, basilic et huile d'olive.</p>
-     </li>
-
-
-    <!-- Ajouter deux autres entrées avec descriptions -->
+    <!-- Performance Optimization: Group menu items within a single <ul> per category instead of creating separate <ul> tags for each item. This reduces total DOM node count, decreases HTML payload size, and optimizes DOM tree parsing efficiency. -->
+    <ul>
+        <li>
+            <strong>Salade Caprese</strong>
+            <p>Tomates fraîches, mozzarella et basilic arrosés d'un filet de glaçage balsamique.</p>
+        </li>
+        <li>
+            <strong>Soupe à la citrouille</strong>
+            <p>Velouté de citrouille crémeux avec une touche de muscade et de crème fraîche.</p>
+        </li>
+        <li>
+            <strong>Bruschetta</strong>
+            <p>Tranches de pain grillé garnies de tomates, ail, basilic et huile d'olive.</p>
+        </li>
+        <!-- Ajouter deux autres entrées avec descriptions -->
     </ul>
 
-
-  <h2>Plats principaux</h2>
-
-   <ul>
-
-     <li>
-
-      <strong>Saumon grillé</strong>
-
-       <p>Filet de saumon assaisonné et grillé à la perfection, servi avec une sauce au beurre citronné.</p>
-    </li>
-</ul>
-
+    <h2>Plats principaux</h2>
     <ul>
+        <li>
+            <strong>Saumon grillé</strong>
+            <p>Filet de saumon assaisonné et grillé à la perfection, servi avec une sauce au beurre citronné.</p>
+        </li>
         <li>
             <strong>Poulet rôti aux herbes</strong>
             <p>Poulet rôti avec un mélange d'herbes aromatiques, accompagné de légumes de saison.</p>
         </li>
-    </ul>
-
-    <ul>
         <li>
             <strong>Risotto aux champignons</strong>
             <p>Risotto crémeux aux champignons sauvages et parmesan</p>
-    </li>
-</ul>
-
-   <!-- Ajouter deux autres plats principaux avec leurs descriptions -->
-
-
- <h2>Desserts</h2>
-
- <ul>
-    <li>
-        <strong>Fondue au chocolat</strong>
-        <p>Assortiment de fruits et de guimauves servi avec une onctueuse fondue au chocolat.</p>
-    </li>
- </ul>
-
-       <ul>
-       <li>
-       <strong>Tarte aux pommes</strong>
-
-       <p>Tarte aux pommes maison avec une pâte croustillante et des pommes caramélisées.</p>
-         </li>
+        </li>
+        <!-- Ajouter deux autres plats principaux avec leurs descriptions -->
     </ul>
+
+    <h2>Desserts</h2>
     <ul>
-         <li>
+        <li>
+            <strong>Fondue au chocolat</strong>
+            <p>Assortiment de fruits et de guimauves servi avec une onctueuse fondue au chocolat.</p>
+        </li>
+        <li>
+            <strong>Tarte aux pommes</strong>
+            <p>Tarte aux pommes maison avec une pâte croustillante et des pommes caramélisées.</p>
+        </li>
+        <li>
+            <strong>Mousse au chocolat</strong>
+            <p>Mousse légère et aérienne au chocolat noir, garnie de copeaux de chocolat.</p>
+        </li>
+        <!-- Ajouter deux autres desserts avec leurs descriptions -->
+    </ul>
 
-       <strong>Mousse au chocolat</strong>
-
-       <p>Mousse légère et aérienne au chocolat noir, garnie de copeaux de chocolat.</p>
-    </li>
-
-    <!-- Ajouter deux autres desserts avec leurs descriptions -->
-
-  </ul>
-
-   <p><a href="contact.html">Contactez-nous pour réserver</a></p>
-
+    <p><a href="contact.html">Contactez-nous pour réserver</a></p>
 </body>
-
- </html>
-
-
+</html>
